@@ -1,0 +1,30 @@
+name: ChimeraCoach
+options:
+  minimumXcodeGenVersion: 2.32.0
+  deploymentTarget:
+    iOS: 15.0
+packages: {}
+targets:
+  ChimeraCoach:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    bundleId: com.chimera-ascendant.poc
+    sources:
+      - path: App
+      - path: Audio
+      - path: Intent
+      - path: Networking
+      - path: Perception
+      - path: Cognitive
+      - path: UI
+    info:
+      path: App/Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: ChimeraCoach
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: App/Info.plist
+    scheme:
+      testTargets: []
