@@ -9,6 +9,7 @@ struct ChimeraWorkoutView: View {
     @State private var isActive: Bool = false
     @State private var lastVoice: String = ""
     @State private var showSettings: Bool = false
+    @State private var showTelemetry: Bool = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -45,6 +46,12 @@ struct ChimeraWorkoutView: View {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.bordered)
+                Button {
+                    showTelemetry = true
+                } label: {
+                    Image(systemName: "waveform.path.ecg")
+                }
+                .buttonStyle(.bordered)
             }
 
             Button("Voice Command") {
@@ -72,6 +79,9 @@ struct ChimeraWorkoutView: View {
             }
         }) {
             SettingsView(store: settings)
+        }
+        .sheet(isPresented: $showTelemetry) {
+            TelemetryView(engine: perception)
         }
     }
 

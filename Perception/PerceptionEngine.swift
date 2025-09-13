@@ -20,6 +20,10 @@ final class PerceptionEngine: ObservableObject {
     @Published var formQuality: FormQuality = .unknown
     @Published var repCount: Int = 0
     @Published var fatigueLevel: Float = 0.0
+    // Debug telemetry
+    @Published var debugExerciseLogits: [Float] = []
+    @Published var debugFormLogits: [Float] = []
+    @Published var debugRepMean: Float = 0.0
 
     private var model: MLModel?
     private let sequenceLength = 300
@@ -61,6 +65,7 @@ final class PerceptionEngine: ObservableObject {
             if let ex = out.featureValue(for: "exercise_logits")?.multiArrayValue {
                 let idx = argmax1D(ex)
                 currentExercise = Exercise(rawValue: labelForExercise(idx)) ?? .unknown
+                debugExerciseLogits = toArray(ex)
             }
             if let fatigue = out.featureValue(for: "fatigue_score")?.multiArrayValue {
                 fatigueLevel = Float(truncating: fatigue[idx1D: 0])
@@ -68,12 +73,14 @@ final class PerceptionEngine: ObservableObject {
             if let rep = out.featureValue(for: "rep_probs")?.multiArrayValue {
                 // Very simple peak proxy: if mean prob > 0.5, count 1
                 let mean = mean1D(rep)
+                debugRepMean = mean
                 if mean > 0.5 { repCount += 1 }
             }
             // Form quality placeholder from form logits: not mapped yet to discrete labels
             if let form = out.featureValue(for: "form_logits")?.multiArrayValue {
                 let idx = argmax1D(form)
                 formQuality = idx == 0 ? .excellent : (idx == 1 ? .needsWork : .good)
+                debugFormLogits = toArray(form)
             }
         } catch {
             print("❌ Inference error: \(error)")
@@ -107,17 +114,20 @@ final class PerceptionEngine: ObservableObject {
             if let ex = out.featureValue(for: "exercise_logits")?.multiArrayValue {
                 let idx = argmax1D(ex)
                 currentExercise = Exercise(rawValue: labelForExercise(idx)) ?? .unknown
+                debugExerciseLogits = toArray(ex)
             }
             if let fatigue = out.featureValue(for: "fatigue_score")?.multiArrayValue {
                 fatigueLevel = Float(truncating: fatigue[idx1D: 0])
             }
             if let rep = out.featureValue(for: "rep_probs")?.multiArrayValue {
                 let mean = mean1D(rep)
+                debugRepMean = mean
                 if mean > 0.5 { repCount += 1 }
             }
             if let form = out.featureValue(for: "form_logits")?.multiArrayValue {
                 let idx = argmax1D(form)
                 formQuality = idx == 0 ? .excellent : (idx == 1 ? .needsWork : .good)
+                debugFormLogits = toArray(form)
             }
         } catch {
             print("❌ Inference error: \(error)")
@@ -153,4 +163,12 @@ private func mean1D(_ a: MLMultiArray) -> Float {
     var sum: Float = 0
     for i in 0..<a.count { sum += Float(truncating: a[idx1D: i]) }
     return sum / Float(max(1, a.count))
+}
+
+private func toArray(_ a: MLMultiArray) -> [Float] {
+    let count = a.count
+    var result = [Float](repeating: 0, count: count)
+    let ptr = a.dataPointer.bindMemory(to: Float.self, capacity: count)
+    for i in 0..<count { result[i] = ptr[i] }
+    return result
 }
