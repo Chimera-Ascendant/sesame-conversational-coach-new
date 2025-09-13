@@ -8,7 +8,8 @@ final class CognitiveCore: ObservableObject {
     private let perception: PerceptionEngine
     private let audio: UnifiedAudioEngine
     private let intents = IntentClassifier()
-    private let client: CognitiveClient
+    private var client: CognitiveClient
+    private let motion = MotionManager.shared
 
     private var timer: Timer?
     private var lastCueTime: Date = .distantPast
@@ -28,6 +29,7 @@ final class CognitiveCore: ObservableObject {
         isWorkoutActive = true
         lastCueTime = .distantPast
         timer?.invalidate()
+        motion.start()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -38,12 +40,14 @@ final class CognitiveCore: ObservableObject {
         guard isWorkoutActive else { return }
         timer?.invalidate()
         isWorkoutActive = false
+        motion.stop()
         speak("Workout paused.")
     }
 
     func endWorkout() {
         timer?.invalidate()
         isWorkoutActive = false
+        motion.stop()
         speak("Workout complete. Great work today.")
     }
 
@@ -63,8 +67,9 @@ final class CognitiveCore: ObservableObject {
 
     private func tick() {
         guard isWorkoutActive else { return }
-        // For now, drive mock perception
-        perception.processMockFrame()
+        // Gather latest IMU + baro ring buffer and run perception
+        let snap = motion.snapshot()
+        perception.infer(snapshot: snap)
         // Proactive check – query with silence intent to get short coach cue if needed
         queryCognitiveCore(userText: "")
     }
@@ -111,5 +116,10 @@ final class CognitiveCore: ObservableObject {
 
     private func speak(_ text: String) {
         audio.speak(text) {}
+    }
+
+    // Update networking client (e.g., after settings change)
+    func updateClient(_ newClient: CognitiveClient) {
+        self.client = newClient
     }
 }

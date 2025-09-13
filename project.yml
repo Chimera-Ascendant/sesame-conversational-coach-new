@@ -18,6 +18,9 @@ targets:
       - path: Perception
       - path: Cognitive
       - path: UI
+      - path: Settings
+    resources:
+      - path: Models
     info:
       path: App/Info.plist
     settings:

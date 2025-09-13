@@ -3,10 +3,12 @@ import SwiftUI
 struct ChimeraWorkoutView: View {
     @StateObject private var audio = UnifiedAudioEngine()
     @StateObject private var perception = PerceptionEngine()
+    @StateObject private var settings = SettingsStore()
     @State private var core: CognitiveCore?
 
     @State private var isActive: Bool = false
     @State private var lastVoice: String = ""
+    @State private var showSettings: Bool = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -37,12 +39,19 @@ struct ChimeraWorkoutView: View {
                     Button("End") { core?.endWorkout(); isActive = false }
                         .buttonStyle(.bordered)
                 }
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.bordered)
             }
 
             Button("Voice Command") {
-                audio.startListening { recognized in
-                    lastVoice = recognized ?? ""
-                    core?.processVoiceCommand(recognized ?? "")
+                audio.transcribeOnce { recognized in
+                    let text = recognized ?? ""
+                    lastVoice = text
+                    core?.processVoiceCommand(text)
                 }
             }
             .buttonStyle(.bordered)
@@ -51,7 +60,18 @@ struct ChimeraWorkoutView: View {
         }
         .padding()
         .onAppear {
-            core = CognitiveCore(perception: perception, audio: audio)
+            let client = CognitiveClient(baseURL: URL(string: settings.baseURLString)!, bearerToken: settings.token)
+            settings.apply(to: client)
+            core = CognitiveCore(perception: perception, audio: audio, client: client)
+        }
+        .sheet(isPresented: $showSettings, onDismiss: {
+            if let core = core {
+                let client = CognitiveClient(baseURL: URL(string: settings.baseURLString)!, bearerToken: settings.token)
+                settings.apply(to: client)
+                core.updateClient(client)
+            }
+        }) {
+            SettingsView(store: settings)
         }
     }
 

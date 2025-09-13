@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Accelerate
+import Speech
 
 enum AudioState {
     case idle
@@ -15,6 +16,12 @@ final class UnifiedAudioEngine: ObservableObject {
 
     private let audioSession = AVAudioSession.sharedInstance()
     private let engine = AVAudioEngine()
+    private let synth = AVSpeechSynthesizer()
+
+    // Speech recognition
+    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
 
     // Simple energy-threshold VAD
     private let vadQueue = DispatchQueue(label: "audio.vad")
@@ -33,22 +40,27 @@ final class UnifiedAudioEngine: ObservableObject {
         }
     }
 
-    // MARK: - Listening (with simple VAD)
-    func startListening(handler: @escaping (String?) -> Void) {
+    // MARK: - ASR: single-utterance transcription
+    func transcribeOnce(timeout: TimeInterval = 6.0, handler: @escaping (String?) -> Void) {
         guard audioState == .idle else { handler(nil); return }
+        requestSpeechPermissions { [weak self] granted in
+            guard let self = self, granted else { handler(nil); return }
+            self.startASR(handler: handler, timeout: timeout)
+        }
+    }
+
+    private func startASR(handler: @escaping (String?) -> Void, timeout: TimeInterval) {
         transition(to: .listening)
+        recognitionTask?.cancel(); recognitionTask = nil
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        recognitionRequest?.shouldReportPartialResults = true
+        recognitionRequest?.requiresOnDeviceRecognition = true
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
-            self.vadQueue.async {
-                let level = self.averagePower(buffer: buffer)
-                if level > self.energyThreshold {
-                    // In a later iteration, feed to SFSpeechRecognizer. For PoC scaffold, just echo.
-                }
-            }
+            self?.recognitionRequest?.append(buffer)
         }
 
         engine.prepare()
@@ -57,23 +69,41 @@ final class UnifiedAudioEngine: ObservableObject {
             isRecording = true
         } catch {
             print("Audio engine start failed: \(error)")
-            stopListening()
+            stopASR()
             handler(nil)
             return
         }
 
-        // For scaffold, stop after 1.5 seconds and return nil (no speech)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.stopListening()
-            handler(nil)
+        var bestFinal: String?
+        var lastAudioAt = Date()
+
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest!, resultHandler: { [weak self] result, error in
+            if let res = result {
+                let text = res.bestTranscription.formattedString
+                if !text.isEmpty { lastAudioAt = Date() }
+                if res.isFinal { bestFinal = text; self?.stopASR(); handler(text); }
+            }
+            if error != nil { self?.stopASR(); handler(bestFinal) }
+        })
+
+        // Silence timeout watchdog
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            guard let self = self else { return }
+            if Date().timeIntervalSince(lastAudioAt) >= timeout {
+                let text = bestFinal
+                self.stopASR(); handler(text)
+            }
         }
     }
 
-    func stopListening() {
+    func stopASR() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isRecording = false
         if audioState == .listening { transition(to: .idle) }
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask = nil
     }
 
     // MARK: - Speaking
@@ -84,8 +114,6 @@ final class UnifiedAudioEngine: ObservableObject {
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = 0.48 // slightly slower than default
         utterance.volume = 0.9
-
-        let synth = AVSpeechSynthesizer()
         synth.speak(utterance)
 
         // Poll completion
@@ -98,10 +126,7 @@ final class UnifiedAudioEngine: ObservableObject {
         }
     }
 
-    func stopSpeaking() {
-        // Minimal placeholder; AVSpeechSynthesizer instance is local per speak() for now
-        transition(to: .idle)
-    }
+    func stopSpeaking() { synth.stopSpeaking(at: .immediate); transition(to: .idle) }
 
     // MARK: - Helpers
     private func averagePower(buffer: AVAudioPCMBuffer) -> Float {
@@ -116,5 +141,13 @@ final class UnifiedAudioEngine: ObservableObject {
 
     private func transition(to new: AudioState) {
         DispatchQueue.main.async { [weak self] in self?.audioState = new }
+    }
+
+    private func requestSpeechPermissions(completion: @escaping (Bool) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            DispatchQueue.main.async {
+                completion(status == .authorized)
+            }
+        }
     }
 }
